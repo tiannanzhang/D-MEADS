@@ -318,9 +318,9 @@ class Kernel:
       print ("{}: {:d}".format(a, int(round(value / count))))
 
     print ("Simulation ending!")
-    stock_name = self.log_dir.split("_")[2]
-    date = self.log_dir.split("_")[3]
-    time = self.log_dir.split("_")[4]
+    stock_name = self.log_dir.split("_")[1]
+    date = self.log_dir.split("_")[2]
+    time = self.log_dir.split("_")[3]
     path = os.path.join(os.getcwd(), "ABIDES", "log", self.log_dir)
     liquidity_telemetry.main(
       exchange_path=path+"/EXCHANGE_AGENT.bz2", 
