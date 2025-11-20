@@ -318,9 +318,19 @@ class Kernel:
       print ("{}: {:d}".format(a, int(round(value / count))))
 
     print ("Simulation ending!")
-    stock_name = self.log_dir.split("_")[1]
-    date = self.log_dir.split("_")[2]
-    time = self.log_dir.split("_")[3]
+    # Handle different log_dir naming conventions:
+    # - world_agent_STOCK_DATE_TIME or market_replay_STOCK_DATE_TIME → indices 2,3,4
+    # - rmsc03_STOCK_DATE_TIME → indices 1,2,3
+    parts = self.log_dir.split("_")
+    if self.log_dir.startswith("world_agent") or self.log_dir.startswith("market_replay"):
+        stock_name = parts[2]
+        date = parts[3]
+        time = parts[4]
+    else:
+        # IABS (rmsc03) and other configs
+        stock_name = parts[1]
+        date = parts[2]
+        time = parts[3]
     path = os.path.join(os.getcwd(), "ABIDES", "log", self.log_dir)
     liquidity_telemetry.main(
       exchange_path=path+"/EXCHANGE_AGENT.bz2", 
