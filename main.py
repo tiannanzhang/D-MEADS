@@ -35,16 +35,31 @@ def set_torch():
 
 def plot_graphs(real_data_path=None, TRADES_data_path=None, iabs_data_path=None, cgan_data_path=None):
     warnings.filterwarnings("ignore")
-    comparison_distribution_order_type.main(real_data_path, TRADES_data_path, iabs_data_path, cgan_data_path)
-    comparison_distribution_market_spread.main(real_data_path, TRADES_data_path, iabs_data_path, cgan_data_path)
+
+    # Order type and market spread comparisons (Real, TRADES, CGAN - no IABS)
+    comparison_distribution_order_type.main(real_data_path, TRADES_data_path, cgan_data_path)
+    comparison_distribution_market_spread.main(real_data_path, TRADES_data_path, cgan_data_path)
+
+    # PCA plots for Real vs TRADES and Real vs CGAN
     PCA_plots.main(real_data_path, TRADES_data_path)
+    PCA_plots.main(real_data_path, cgan_data_path)
+
+    # Midprice comparison for Real vs TRADES and Real vs CGAN
     comparison_midprice.main(real_data_path, TRADES_data_path)
+    comparison_midprice.main(real_data_path, cgan_data_path)
+
+    # Volume distribution for Real, TRADES, and CGAN
+    comparison_volume_distribution.main(real_data_path)
     comparison_volume_distribution.main(TRADES_data_path)
+    comparison_volume_distribution.main(cgan_data_path)
+
     # these last plots are slow, they will take a couple of minutes to run
-    comparison_core_coef_lags.main(real_data_path, TRADES_data_path, iabs_data_path, cgan_data_path)
-    comparison_correlation_coefficient.main(real_data_path, TRADES_data_path, iabs_data_path, cgan_data_path)
+    comparison_core_coef_lags.main(real_data_path, TRADES_data_path, cgan_data_path)
+    comparison_correlation_coefficient.main(real_data_path, TRADES_data_path, cgan_data_path)
+
     comparison_log_return_frequency.main(real_data_path, TRADES_data_path, cgan_data_path)
-    comparison_distribution_log_interarrival_times.main(real_data_path, TRADES_data_path, iabs_data_path, cgan_data_path)
+
+    comparison_distribution_log_interarrival_times.main(real_data_path, TRADES_data_path, cgan_data_path)
 
 if __name__ == "__main__":
     set_torch()

@@ -73,21 +73,21 @@ def compute_correlation_by_lag(log_returns, max_lag):
         correlations.append(corr)
     return correlations
 
-def main(real_path, TRADES_path, iabs_path, cgan_path):
-    
+def main(real_path, TRADES_path, cgan_path):
+
     log_returns_real = load_and_compute_log_returns(real_path)
-    log_returns_TRADES = load_and_compute_log_returns(TRADES_path) 
-    log_returns_iabs = load_and_compute_log_returns(iabs_path)
+    log_returns_TRADES = load_and_compute_log_returns(TRADES_path)
+    # log_returns_iabs = load_and_compute_log_returns(iabs_path)  # IABS commented out
     log_returns_cgan = load_and_compute_log_returns(cgan_path)
 
     correlations_real = compute_correlation_by_lag(log_returns_real, 30)
     correlations_TRADES = compute_correlation_by_lag(log_returns_TRADES, 30)
-    correlations_iabs = compute_correlation_by_lag(log_returns_iabs, 30)
+    # correlations_iabs = compute_correlation_by_lag(log_returns_iabs, 30)  # IABS commented out
     correlations_cgan = compute_correlation_by_lag(log_returns_cgan, 30)
-    
+
     plt.plot(range(1, 31, 2), correlations_real, marker='o', linestyle='-', label='Real', color='orange')
     plt.plot(range(1, 31, 2), correlations_TRADES, marker='o', linestyle='-', label='TRADES', color='blue')
-    plt.plot(range(1, 31, 2), correlations_iabs, marker='o', linestyle='-', label='IABS', color='green')
+    # plt.plot(range(1, 31, 2), correlations_iabs, marker='o', linestyle='-', label='IABS', color='green')  # IABS commented out
     plt.plot(range(1, 31, 2), correlations_cgan, marker='o', linestyle='-', label='CGAN', color='red')
 
     plt.xlabel('Lag (minutes)')
