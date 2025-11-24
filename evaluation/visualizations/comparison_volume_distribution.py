@@ -76,25 +76,25 @@ def main(path):
     
     # Detect label based on path characteristics
     if "market_replay" in path.lower() or "replay" in path.lower():
-        upper_bound = 3000 if "INTC" in path else 1000
+        upper_bound = 7000 if "INTC" in path else 1000
         plt.ylim(50, upper_bound)
         title = "Volume Market Replay"
     elif "IABS" in path:
         title = "Volume IABS simulation"
     elif "val_ema=-" in path:  # Negative checkpoint values = CGAN
-        upper_bound = 15000 if "INTC" in path else 10000
+        upper_bound = 20000 if "INTC" in path else 10000
         plt.ylim(50, upper_bound)
         title = "Volume CGAN simulation"
     elif "val_ema=" in path:  # Positive checkpoint values = TRADES
-        upper_bound = 3000 if "INTC" in path else 600
+        upper_bound = 7000 if "INTC" in path else 600
         plt.ylim(50, upper_bound)
         title = "Volume TRADES simulation"
     elif "GAN" in path or "CGAN" in path:
-        upper_bound = 15000 if "INTC" in path else 10000
+        upper_bound = 20000 if "INTC" in path else 10000
         plt.ylim(50, upper_bound)
         title = "Volume CGAN simulation"
     elif "TRADES" in path:
-        upper_bound = 3000 if "INTC" in path else 600
+        upper_bound = 7000 if "INTC" in path else 600
         plt.ylim(50, upper_bound)
         title = "Volume TRADES simulation"
     else:
