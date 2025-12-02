@@ -27,6 +27,7 @@ import configuration
 from models.diffusers.diffusion_engine import DiffusionEngine
 from models.gan.gan_engine import GANEngine
 
+torch.serialization.add_safe_globals([configuration.Configuration, getattr])
 
 
 ########################################################################################################################
@@ -244,7 +245,7 @@ if args.diffusion:
     config.HYPER_PARAMETERS[cst.LearningHyperParameter.DDIM_NSTEPS] = args.ddim_nsteps
     if config.CHOSEN_MODEL == cst.Models.TRADES:
         # load checkpoint
-        model = DiffusionEngine.load_from_checkpoint(checkpoint_reference, config=config, map_location=cst.DEVICE)
+        model = DiffusionEngine.load_from_checkpoint(checkpoint_reference, config=config, map_location=cst.DEVICE, weights_only=False)
         agents.extend([WorldAgent(id=1,
                           name="WORLD_AGENT",
                           type="WorldAgent",
@@ -266,7 +267,7 @@ if args.diffusion:
                           )
                ])
     elif config.CHOSEN_MODEL == cst.Models.CGAN:
-        model = GANEngine.load_from_checkpoint(checkpoint_reference, config=config, map_location=cst.DEVICE)
+        model = GANEngine.load_from_checkpoint(checkpoint_reference, config=config, map_location=cst.DEVICE, weights_only = False)
         agents.extend([WorldAgent(id=1,
                           name="WORLD_AGENT",
                           type="WorldAgent",
