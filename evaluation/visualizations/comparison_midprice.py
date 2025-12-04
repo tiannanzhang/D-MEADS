@@ -54,12 +54,19 @@ def main(real_path, generated_path):
     # convert time2 to matplotlib date format
     time2 = dates.date2num(time2)
     '''
-    if "IABS" in generated_path:
+    # Detect label based on path characteristics
+    if "market_replay" in generated_path.lower() or "replay" in generated_path.lower():
+        label = "Market Replay"
+    elif "IABS" in generated_path:
         label = "IABS"
+    elif "val_ema=-" in generated_path:  # Negative checkpoint values = CGAN
+        label = "CGAN"
+    elif "val_ema=" in generated_path:  # Positive checkpoint values = TRADES
+        label = "TRADES"
+    elif "GAN" in generated_path or "CGAN" in generated_path:
+        label = "CGAN"
     elif "TRADES" in generated_path:
         label = "TRADES"
-    elif "GAN" in generated_path:
-        label = "CGAN"
     else:
         label = "TRADES"
     plt.plot(time1, mid_price1, label='Real', color='blue')

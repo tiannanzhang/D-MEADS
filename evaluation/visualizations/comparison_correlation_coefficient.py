@@ -4,7 +4,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-def main(real_path, TRADES_path, iabs_path, cgan_path):
+def main(real_path, TRADES_path, cgan_path):
     def load_and_compute_correlation(file_path, window=30, lag=1):
         df = pd.read_csv(file_path)
         df.rename(columns={'Unnamed: 0': 'time'}, inplace=True)
@@ -21,14 +21,14 @@ def main(real_path, TRADES_path, iabs_path, cgan_path):
 
     correlation_real = load_and_compute_correlation(real_path)
     correlation_TRADES = load_and_compute_correlation(TRADES_path)
-    correlation_iabs = load_and_compute_correlation(iabs_path)
+    # correlation_iabs = load_and_compute_correlation(iabs_path)  # IABS commented out
     correlation_cgan = load_and_compute_correlation(cgan_path)
-    
-    
+
+
     sns.set(style="whitegrid")
 
     sns.kdeplot(correlation_real, shade=True, color="orange", label='Real')
-    sns.kdeplot(correlation_iabs, shade=True, color="green", label='IABS')
+    # sns.kdeplot(correlation_iabs, shade=True, color="green", label='IABS')  # IABS commented out
     sns.kdeplot(correlation_TRADES, shade=True, color="blue", label='TRADES')
     sns.kdeplot(correlation_cgan, shade=True, color="red", label='CGAN')
 

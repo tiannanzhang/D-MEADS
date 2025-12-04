@@ -74,19 +74,33 @@ def main(path):
     
     
     
-    if "replay" in path:
-        plt.ylim(50, 600)
+    # Detect label based on path characteristics
+    if "market_replay" in path.lower() or "replay" in path.lower():
+        upper_bound = 7000 if "INTC" in path else 1000
+        plt.ylim(50, upper_bound)
         title = "Volume Market Replay"
-    if "IABS" in path:
+    elif "IABS" in path:
         title = "Volume IABS simulation"
-    elif "TRADES" in path:
-        plt.ylim(50, 600)
-        title = "Volume TRADES simulation"
-    elif "GAN" in path:
+    elif "val_ema=-" in path:  # Negative checkpoint values = CGAN
+        upper_bound = 20000 if "INTC" in path else 10000
+        plt.ylim(50, upper_bound)
         title = "Volume CGAN simulation"
+    elif "val_ema=" in path:  # Positive checkpoint values = TRADES
+        upper_bound = 7000 if "INTC" in path else 600
+        plt.ylim(50, upper_bound)
+        title = "Volume TRADES simulation"
+    elif "GAN" in path or "CGAN" in path:
+        upper_bound = 20000 if "INTC" in path else 10000
+        plt.ylim(50, upper_bound)
+        title = "Volume CGAN simulation"
+    elif "TRADES" in path:
+        upper_bound = 7000 if "INTC" in path else 600
+        plt.ylim(50, upper_bound)
+        title = "Volume TRADES simulation"
     else:
         title = "Volume TRADES simulation"
-        plt.ylim(50, 600)
+        upper_bound = 3000 if "INTC" in path else 600
+        plt.ylim(50, upper_bound)
     plt.title(title)
 
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-def main(real_path, TRADES_path, iabs_path, cgan_path):
+def main(real_path, TRADES_path, cgan_path):
     # Define a function to convert TIME to seconds
     def time_to_seconds(time_str):
         time = pd.to_datetime(time_str)
@@ -15,7 +15,7 @@ def main(real_path, TRADES_path, iabs_path, cgan_path):
     data_list = [
         {'df': pd.read_csv(real_path), 'label': 'Real', 'color': 'blue'},
         {'df': pd.read_csv(TRADES_path), 'label': 'TRADES', 'color': 'red'},
-        {'df': pd.read_csv(iabs_path), 'label': 'IABS', 'color': 'green'},
+        # {'df': pd.read_csv(iabs_path), 'label': 'IABS', 'color': 'green'},  # IABS commented out
         {'df': pd.read_csv(cgan_path), 'label': 'CGAN', 'color': 'orange'}
     ]
 
