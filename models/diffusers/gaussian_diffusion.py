@@ -49,51 +49,78 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
             self.IS_AUGMENTATION,
             self.dropout,
             config.COND_TYPE,
-            self.cond_method
+            self.cond_method,
+            use_news_features=config.USE_NEWS_FEATURES,
+            news_feature_dim=config.NEWS_FEATURE_DIM,
+            lob_is_augmented=(config.CHOSEN_COND_AUGMENTER == "MLP"),
+            augment_dim=config.HYPER_PARAMETERS[LearningHyperParameter.AUGMENT_DIM]
         )
 
-        self.betas = config.BETAS
-        self.alphas = 1 - self.betas
-        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0, dtype=torch.float32)
-        self.alphas_cumprod_prev = torch.cat([torch.Tensor([self.alphas_cumprod[0]]).to(cst.DEVICE), self.alphas_cumprod[:-1]])
+        # Register diffusion parameters as buffers for proper device handling
+        betas = config.BETAS.to(cst.DEVICE)
+        alphas = (1 - betas).to(cst.DEVICE)
+        alphas_cumprod = torch.cumprod(alphas, dim=0, dtype=torch.float32).to(cst.DEVICE)
+
+        # Register as buffers so they move with the model and are saved in checkpoints
+        self.register_buffer('betas', betas)
+        self.register_buffer('alphas', alphas)
+        self.register_buffer('alphas_cumprod', alphas_cumprod)
+
+        alphas_cumprod_prev = torch.cat([alphas_cumprod[0:1], alphas_cumprod[:-1]]).to(cst.DEVICE)
+        self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
+
         # calculation for posterior q(x_{t-1} | x_t, x_0)
-        self.posterior_var = (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod) * self.betas
-        self.posterior_log_var_clipped = torch.log(self.posterior_var)
-        self.posterior_mean_coef1 = (
-            self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
-        )
-        self.posterior_mean_coef2 = (
-            (1.0 - self.alphas_cumprod_prev) * torch.sqrt(self.alphas)
-            / (1.0 - self.alphas_cumprod)
-        )
+        # Add small epsilon to prevent division by zero
+        eps = 1e-8
+        posterior_var = (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod + eps) * betas
+        posterior_log_var_clipped = torch.log(torch.clamp(posterior_var, min=eps))
+        posterior_mean_coef1 = betas * torch.sqrt(alphas_cumprod_prev) / (1.0 - alphas_cumprod + eps)
+        posterior_mean_coef2 = (1.0 - alphas_cumprod_prev) * torch.sqrt(alphas) / (1.0 - alphas_cumprod + eps)
+
+        self.register_buffer('posterior_var', posterior_var)
+        self.register_buffer('posterior_log_var_clipped', posterior_log_var_clipped)
+        self.register_buffer('posterior_mean_coef1', posterior_mean_coef1)
+        self.register_buffer('posterior_mean_coef2', posterior_mean_coef2)
             
         if self.sampling_type == "DDIM":
             self.ddim_eta = config.HYPER_PARAMETERS[LearningHyperParameter.DDIM_ETA]
             self.ddim_nsteps = config.HYPER_PARAMETERS[LearningHyperParameter.DDIM_NSTEPS]
             tmp = self.num_diffusionsteps / self.ddim_nsteps
-            self.t = torch.arange(0, self.num_diffusionsteps, tmp).long() + 1
-            self.ddim_alpha = self.alphas_cumprod[self.t].clone()
-            self.ddim_alpha_sqrt = torch.sqrt(self.ddim_alpha)
-            self.ddim_alpha_prev = torch.cat([torch.Tensor([self.alphas_cumprod[0]]).to(cst.DEVICE), self.alphas_cumprod[self.t[:-1]]])
-            self.ddim_sqrt_one_minus_alpha = (1. - self.ddim_alpha) ** .5
-            self.ddim_sigma = (self.ddim_eta *
-                               ((1 - self.ddim_alpha_prev) / (1 - self.ddim_alpha) *
-                                (1 - self.ddim_alpha / self.ddim_alpha_prev)) ** .5)
+            t = torch.arange(0, self.num_diffusionsteps, tmp).long().to(cst.DEVICE) + 1
+            ddim_alpha = self.alphas_cumprod[t].clone().to(cst.DEVICE)
+            ddim_alpha_sqrt = torch.sqrt(ddim_alpha).to(cst.DEVICE)
+            ddim_alpha_prev = torch.cat([self.alphas_cumprod[0:1], self.alphas_cumprod[t[:-1]]]).to(cst.DEVICE)
+            ddim_sqrt_one_minus_alpha = (1. - ddim_alpha).to(cst.DEVICE) ** .5
+            ddim_sigma = (self.ddim_eta *
+                         ((1 - ddim_alpha_prev) / (1 - ddim_alpha + 1e-8) *
+                          (1 - ddim_alpha / (ddim_alpha_prev + 1e-8))) ** .5).to(cst.DEVICE)
+
+            # Register DDIM buffers
+            self.register_buffer('t', t)
+            self.register_buffer('ddim_alpha', ddim_alpha)
+            self.register_buffer('ddim_alpha_sqrt', ddim_alpha_sqrt)
+            self.register_buffer('ddim_alpha_prev', ddim_alpha_prev)
+            self.register_buffer('ddim_sqrt_one_minus_alpha', ddim_sqrt_one_minus_alpha)
+            self.register_buffer('ddim_sigma', ddim_sigma)
             
         
-    def sample(self, x_0, real_cond_orders, real_cond_lob, weights):
+    def sample(self, x_0, real_cond_orders, real_cond_lob, weights, cond_news=None):
         if self.sampling_type == "DDIM":
-            return self.ddim_sample(x_0, real_cond_orders, real_cond_lob)
+            return self.ddim_sample(x_0, real_cond_orders, real_cond_lob, cond_news)
         elif self.sampling_type == "DDPM":
-            return self.ddpm_sample(x_0, real_cond_orders, real_cond_lob, weights)
+            return self.ddpm_sample(x_0, real_cond_orders, real_cond_lob, weights, cond_news)
         
         
-    def ddim_sample(self, x_0, cond_orders, cond_lob):
+    def ddim_sample(self, x_0, cond_orders, cond_lob, cond_news=None):
         orig_cond_orders = cond_orders.detach().clone()
         if cond_lob is not None:
             orig_cond_lob = cond_lob.detach().clone()
         else:
             orig_cond_lob = None
+        if cond_news is not None:
+            orig_cond_news = cond_news.detach().clone()
+        else:
+            orig_cond_news = None
         tmp = torch.full(size=(x_0.shape[0],), fill_value=self.num_diffusionsteps-1, device=cst.DEVICE, dtype=torch.int64)
         x_t, _ = self.forward_reparametrized(x_0, tmp)
         time_steps = torch.flip(self.t, dims=(0,))
@@ -102,11 +129,11 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
             x_t_aug, cond_orders, cond_lob = self.augment(x_t, orig_cond_orders, orig_cond_lob)
             index = len(time_steps) - i - 1
             ts = x_t.new_full((x_0.shape[0],), step, dtype=torch.long)
-            x_t = self.ddim_single_step(x_t_aug, cond_lob, cond_orders, ts, index, x_t)
+            x_t = self.ddim_single_step(x_t_aug, cond_lob, cond_orders, ts, index, x_t, orig_cond_news)
         return x_t
-        
-    def ddim_single_step(self, x_t_aug, cond_lob, cond_orders, ts, index, x_t):
-        noise_t, v = self.NN(x_t_aug, cond_orders, ts, cond_lob)
+
+    def ddim_single_step(self, x_t_aug, cond_lob, cond_orders, ts, index, x_t, cond_news=None):
+        noise_t, v = self.NN(x_t_aug, cond_orders, ts, cond_lob, cond_news)
         if self.IS_AUGMENTATION:
             noise_t, v = self.deaugment(noise_t, v)
         alpha = self.ddim_alpha[index]
@@ -124,19 +151,23 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
         x_prev = (alpha_prev ** 0.5) * pred_x0 + dir_xt + sigma * noise
         return x_prev
     
-    def ddpm_sample(self, x_0, cond_orders, cond_lob, weights):
+    def ddpm_sample(self, x_0, cond_orders, cond_lob, weights, cond_news=None):
         orig_cond_orders = cond_orders.detach().clone()
         if cond_lob is not None:
             orig_cond_lob = cond_lob.detach().clone()
         else:
             orig_cond_lob = None
+        if cond_news is not None:
+            orig_cond_news = cond_news.detach().clone()
+        else:
+            orig_cond_news = None
         t = torch.full(size=(x_0.shape[0],), fill_value=self.num_diffusionsteps-1, device=cst.DEVICE, dtype=torch.int64)
         x_t, noise = self.forward_reparametrized(x_0, t)
         x_t_orig = x_t
         for i in range(self.num_diffusionsteps-1, -1, -1):
             # augment
             x_t_aug, cond_orders, cond_lob = self.augment(x_t, orig_cond_orders, orig_cond_lob)
-            x_t = self.ddpm_single_step(x_0, x_t_aug, x_t_orig, t, cond_orders, noise, weights, cond_lob)
+            x_t = self.ddpm_single_step(x_0, x_t_aug, x_t_orig, t, cond_orders, noise, weights, cond_lob, orig_cond_news)
             t -= 1
         return x_t
 
@@ -145,7 +176,7 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
         x_t, noise = super().forward_reparametrized(x_0, t)
         return x_t, noise
 
-    def ddpm_single_step(self, x_0, x_t_aug, x_t, t, cond_orders, noise_true, weights, cond_lob, batch_idx=None):
+    def ddpm_single_step(self, x_0, x_t_aug, x_t, t, cond_orders, noise_true, weights, cond_lob, cond_news=None, batch_idx=None):
         '''
         Compute the reverse diffusion process for the current time step
         '''
@@ -157,13 +188,15 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
         alpha_t = repeat(alpha_t, 'b -> b l d', l=self.gen_seq_size, d=x_0.shape[-1])
         alpha_cumprod_t = repeat(alpha_cumprod_t, 'b -> b l d', l=self.gen_seq_size, d=x_0.shape[-1])
         # Get the noise and v outputs from the neural network for the current time step
-        noise_t, v = self.NN(x_t_aug, cond_orders, t, cond_lob)
-        #noise_t = self.NN(x_t_aug, cond_orders, t, cond_lob)
-        #check for nan in x_t_aug and cond and noise_t
-        #if torch.isnan(v).any():
-        #    print("v", v.max())
+        noise_t, v = self.NN(x_t_aug, cond_orders, t, cond_lob, cond_news)
+
+        # DEBUG: Check for NaN or extreme values in network outputs
+        if torch.isnan(v).any():
+            print(f"v has NaN! min={v.min().item()}, max={v.max().item()}, mean={v.mean().item()}")
+        if torch.isinf(v).any():
+            print(f"v has Inf! min={v.min().item()}, max={v.max().item()}")
         if torch.isnan(noise_t).any():
-            print("noise_t:", noise_t.max())
+            print(f"noise_t has NaN! min={noise_t[~torch.isnan(noise_t)].min().item() if (~torch.isnan(noise_t)).any() else 'all NaN'}, max={noise_t[~torch.isnan(noise_t)].max().item() if (~torch.isnan(noise_t)).any() else 'all NaN'}")
         if self.IS_AUGMENTATION:
             noise_t, v = self.deaugment(noise_t, v)
         # Compute the variance for the current time step using the formula from the IDDPM paper
@@ -177,7 +210,8 @@ class GaussianDiffusion(nn.Module, DiffusionAB):
         std_t = torch.sqrt(var_t)
         
         # Sample a standard normal random variable z
-        z = torch.distributions.normal.Normal(0, 1).sample(x_t.shape).to(cst.DEVICE, non_blocking=True)
+        # CRITICAL: Remove non_blocking=True to prevent MPS corruption during training
+        z = torch.distributions.normal.Normal(0, 1).sample(x_t.shape).to(cst.DEVICE)
         
         #std_t = self.betas[t]
         #std_t = repeat(std_t, 'b -> b l d', l=self.gen_seq_size, d=x_0.shape[-1])

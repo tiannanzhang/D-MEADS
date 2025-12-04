@@ -2,13 +2,14 @@ from einops import rearrange
 import numpy as np
 from torch import nn
 import os
-from lightning import LightningModule
+from pytorch_lightning import LightningModule
 import torch
 import constants as cst
 from constants import LearningHyperParameter
 import matplotlib.pyplot as plt
 
 import wandb
+from configuration import Configuration
 from models.diffusers.gaussian_diffusion import GaussianDiffusion
 from utils.utils_models import pick_augmenter
 from lion_pytorch import Lion
@@ -38,7 +39,8 @@ class DiffusionEngine(LightningModule):
         self.epochs = config.HYPER_PARAMETERS[LearningHyperParameter.EPOCHS]
         self.seq_size = config.HYPER_PARAMETERS[LearningHyperParameter.SEQ_SIZE]
         self.train_losses, self.vlb_train_losses, self.simple_train_losses = [], [], []
-        self.val_ema_losses, self.test_ema_losses = [], []
+        self.val_ema_losses, self.simple_val_losses, self.vlb_val_losses = [], [], []
+        self.test_ema_losses = []
         self.min_loss_ema = np.inf
         self.min_train_loss = np.inf
         self.filename_ckpt = config.FILENAME_CKPT
@@ -63,19 +65,34 @@ class DiffusionEngine(LightningModule):
         self.sampler = LossSecondMomentResampler(self.num_diffusionsteps)
         self.vlb_sampler = LossSecondMomentResampler(self.num_diffusionsteps)
         self.simple_sampler = LossSecondMomentResampler(self.num_diffusionsteps)
+
         self.save_hyperparameters()
         
 
-    def forward(self, cond_orders, x_0, cond_lob, is_train, batch_idx=None):
+    def forward(self, cond_orders, x_0, cond_lob, cond_news, is_train, batch_idx=None):
         # x_0 shape is (batch_size, seq_size=1, cst.LEN_ORDER=8)
+
+        # Handle NaN values in news features (replace with 0)
+        # NaN indicates no news data at that timestep - neutral signal
+        if cond_news is not None:
+            cond_news = torch.nan_to_num(cond_news, nan=0.0)
+
         x_0, cond_orders = self.type_embedding(x_0, cond_orders)
+
+        # DEBUG: Check after type_embedding
+        if torch.isnan(x_0).any():
+            print(f"DEBUG forward: NaN in x_0 AFTER type_embedding!")
+            print(f"  x_0 shape: {x_0.shape}, NaN count: {torch.isnan(x_0).sum()}")
+        if torch.isnan(cond_orders).any():
+            print(f"DEBUG forward: NaN in cond_orders AFTER type_embedding!")
+
         if is_train:
             self.t, _ = self.sampler.sample(x_0.shape[0])
-            recon = self.single_step(cond_orders, x_0, cond_lob, batch_idx)
+            recon = self.single_step(cond_orders, x_0, cond_lob, cond_news, batch_idx)
         else:
             self.t = torch.full(size=(x_0.shape[0],), fill_value=self.num_diffusionsteps-1, device=cst.DEVICE, dtype=torch.int64)
             for i in range(self.num_diffusionsteps-1, -1, -1):
-                recon = self.single_step(cond_orders, x_0, cond_lob)
+                recon = self.single_step(cond_orders, x_0, cond_lob, cond_news)
                 self.t -= 1
         return recon
 
@@ -90,7 +107,7 @@ class DiffusionEngine(LightningModule):
         return x_t
 
 
-    def single_step(self, cond_orders, x_0, cond_lob, batch_idx=None):
+    def single_step(self, cond_orders, x_0, cond_lob, cond_news, batch_idx=None):
         # forward process
         x_t, noise = self.diffuser.forward_reparametrized(x_0, self.t)
         if torch.isnan(x_t).any():
@@ -100,7 +117,7 @@ class DiffusionEngine(LightningModule):
         if torch.isnan(x_t_aug).any():
             print("after aug:", x_t_aug.max())
         weights = self.sampler.weights()
-        x_recon = self.diffuser.ddpm_single_step(x_0, x_t_aug, x_t, self.t, cond_orders, noise, weights, cond_lob, batch_idx)
+        x_recon = self.diffuser.ddpm_single_step(x_0, x_t_aug, x_t, self.t, cond_orders, noise, weights, cond_lob, cond_news, batch_idx)
         # return the deaugmented denoised input and the reverse context
         return x_recon
     
@@ -133,12 +150,19 @@ class DiffusionEngine(LightningModule):
         x_0 = input[1].contiguous()
         cond_orders = input[0].contiguous()
         cond_lob = input[2].contiguous()
+
+        # Extract news features if available
+        cond_news = input[3].contiguous() if len(input) > 3 else None
+
         x_0.requires_grad_(True)
         cond_orders.requires_grad_(True)
         cond_lob.requires_grad_(True)
+        if cond_news is not None:
+            cond_news.requires_grad_(True)
+
         if self.cond_type != 'full':
             cond_lob = None
-        recon = self.forward(cond_orders, x_0, cond_lob, is_train=True, batch_idx=batch_idx)
+        recon = self.forward(cond_orders, x_0, cond_lob, cond_news, is_train=True, batch_idx=batch_idx)
         batch_loss, L_simple, L_vlb = self.loss()
         self.simple_train_losses.append(torch.mean(L_simple).item())
         self.vlb_train_losses.append(torch.mean(L_vlb).item())
@@ -149,7 +173,7 @@ class DiffusionEngine(LightningModule):
         self.simple_sampler.update_losses(self.t, L_simple[0])
         self.diffuser.init_losses()
         self.ema.update()
-        if batch_idx % 1000 == 0:
+        if batch_idx % 50 == 0:
             print(f"batch loss: {batch_loss_mean}")
         return batch_loss_mean
 
@@ -157,6 +181,10 @@ class DiffusionEngine(LightningModule):
         print(f'learning rate: {self.optimizer.param_groups[0]["lr"]}')
 
     def on_validation_start(self) -> None:
+        # Skip if no training has occurred yet (e.g., during sanity check)
+        if len(self.train_losses) == 0:
+            return
+
         loss = sum(self.train_losses) / len(self.train_losses)
         if isinstance(self.diffuser, GaussianDiffusion):
             L_simple = sum(self.simple_train_losses) / len(self.simple_train_losses)
@@ -200,16 +228,35 @@ class DiffusionEngine(LightningModule):
         x_0 = input[1]
         cond_orders = input[0]
         cond_lob = input[2]
+
+        # Extract news features if available
+        cond_news = input[3] if len(input) > 3 else None
+
+        # DEBUG: Check inputs for NaN
+        if torch.isnan(cond_orders).any():
+            print(f"DEBUG validation_step: NaN in cond_orders! batch_idx={batch_idx}")
+        if torch.isnan(x_0).any():
+            print(f"DEBUG validation_step: NaN in x_0! batch_idx={batch_idx}")
+            print(f"  x_0 shape: {x_0.shape}, NaN count: {torch.isnan(x_0).sum()}")
+        if torch.isnan(cond_lob).any():
+            print(f"DEBUG validation_step: NaN in cond_lob! batch_idx={batch_idx}")
+        if cond_news is not None and torch.isnan(cond_news).any():
+            print(f"DEBUG validation_step: NaN in cond_news! batch_idx={batch_idx}")
+
         if self.cond_type != 'full':
             cond_lob = None
+
         # Validation: with EMA
+        # NOTE: For fine-tuning, EMA must be reinitialized to include new parameters
+        # This is handled in finetune_with_news.py
         with self.ema.average_parameters():
-            recon = self.forward(cond_orders, x_0, cond_lob, is_train=False)
+            recon = self.forward(cond_orders, x_0, cond_lob, cond_news, is_train=False)
             batch_loss, L_simple, L_vlb = self.loss()
             self.simple_val_losses.append(torch.mean(L_simple).item())
             self.vlb_val_losses.append(torch.mean(L_vlb).item())
             batch_loss_mean = torch.mean(batch_loss)
             self.val_ema_losses.append(batch_loss_mean.item())
+
         self.diffuser.init_losses()
         return batch_loss_mean
 
@@ -241,20 +288,34 @@ class DiffusionEngine(LightningModule):
         
 
     def configure_optimizers(self):
+        # Filter for trainable parameters only (important for fine-tuning with frozen layers)
         if self.optimizer == 'Adam':
-            self.optimizer = torch.optim.Adam(
-                [
-                    {'params': self.diffuser.parameters()},
-                    {'params': self.type_embedder.parameters(), "lr": 0.01},
-                ], 
-                lr=self.lr
-                )
+            param_groups = []
+
+            # Only include diffuser parameters that require gradients
+            diffuser_params = [p for p in self.diffuser.parameters() if p.requires_grad]
+            if diffuser_params:
+                param_groups.append({'params': diffuser_params})
+
+            # Only include type_embedder parameters that require gradients
+            type_embedder_params = [p for p in self.type_embedder.parameters() if p.requires_grad]
+            if type_embedder_params:
+                param_groups.append({'params': type_embedder_params, "lr": 0.01})
+
+            # Use all trainable params if no specific groups (fallback)
+            if not param_groups:
+                param_groups = [{'params': [p for p in self.parameters() if p.requires_grad]}]
+
+            self.optimizer = torch.optim.Adam(param_groups, lr=self.lr)
         elif self.optimizer == 'RMSprop':
-            self.optimizer = torch.optim.RMSprop(self.parameters(), lr=self.lr)
+            trainable_params = [p for p in self.parameters() if p.requires_grad]
+            self.optimizer = torch.optim.RMSprop(trainable_params, lr=self.lr)
         elif self.optimizer == 'SGD':
-            self.optimizer = torch.optim.SGD(self.parameters(), lr=self.lr, momentum=0.9)
+            trainable_params = [p for p in self.parameters() if p.requires_grad]
+            self.optimizer = torch.optim.SGD(trainable_params, lr=self.lr, momentum=0.9)
         elif self.optimizer == 'LION':
-            self.optimizer = Lion(self.parameters(), lr=self.lr)
+            trainable_params = [p for p in self.parameters() if p.requires_grad]
+            self.optimizer = Lion(trainable_params, lr=self.lr)
         return self.optimizer
 
     def _define_log_metrics(self):
@@ -273,5 +334,3 @@ class DiffusionEngine(LightningModule):
         with self.ema.average_parameters():
             self.trainer.save_checkpoint(path_ckpt_ema)
         self.last_path_ckpt_ema = path_ckpt_ema
-
-

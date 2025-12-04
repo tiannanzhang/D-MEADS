@@ -14,7 +14,9 @@ class LOBDataset(data.Dataset):
             chosen_model,
             is_val=False,
             batch_size=None,
-            limit_val_batches=None
+            limit_val_batches=None,
+            news_paths=None,
+            use_news_features=False
     ):
         self.paths = paths
         self.seq_size = seq_size          #sequence length
@@ -24,6 +26,9 @@ class LOBDataset(data.Dataset):
         self.is_val = is_val
         self.batch_size = batch_size
         self.limit_val_batches = limit_val_batches
+        self.news_paths = news_paths
+        self.use_news_features = use_news_features
+        self.news_data = None
         self._get_data()
 
     def __len__(self):
@@ -36,11 +41,18 @@ class LOBDataset(data.Dataset):
         if self.chosen_model == cst.Models.CGAN:
             orders = self.orders[index:index_x]
             market_state = self.market_data[index:index_x]
+            if self.use_news_features and self.news_data is not None:
+                news = self.news_data[index:index_x]
+                return market_state, orders, news
             return market_state, orders
         else:
             cond = self.orders[index:index_cond]
             x_0 = self.orders[index_cond:index_x]
             lob = self.lob[index:index_cond+1]
+            if self.use_news_features and self.news_data is not None:
+                # News features aligned with conditioning sequence
+                news = self.news_data[index:index_cond]
+                return cond, x_0, lob, news
             return cond, x_0, lob
 
     def _get_data(self):
@@ -83,6 +95,23 @@ class LOBDataset(data.Dataset):
                     self.lob = torch.cat((self.lob, lob), dim=0)
                 self.data = torch.cat((self.data, data), dim=0)
                 self.orders = torch.cat((self.orders, orders), dim=0)
+
+        # Load news features if enabled
+        if self.use_news_features and self.news_paths is not None:
+            for i in range(len(self.news_paths)):
+                news_path = self.news_paths[i]
+                news = torch.from_numpy(np.load(news_path)).float().contiguous()
+
+                # Replace NaN values with zeros
+                news = torch.nan_to_num(news, nan=0.0)
+
+                if self.is_val:
+                    news = news[:self.batch_size*self.limit_val_batches]
+
+                if i == 0:
+                    self.news_data = news
+                else:
+                    self.news_data = torch.cat((self.news_data, news), dim=0)
                     
         
 

@@ -30,7 +30,9 @@ def noise_scheduler(num_diffusion_timesteps, max_beta=0.99):
         t1 = i / num_diffusion_timesteps
         t2 = (i + 1) / num_diffusion_timesteps
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
-    return torch.tensor(betas, dtype=torch.float32).to(cst.DEVICE, non_blocking=True)
+    # Create tensor on CPU first, then move to device (non_blocking can corrupt data on MPS)
+    betas_tensor = torch.tensor(betas, dtype=torch.float32)
+    return betas_tensor.to(cst.DEVICE)
 
 
 #formula taken from "Denoising Diffusion Probabilistic Models"

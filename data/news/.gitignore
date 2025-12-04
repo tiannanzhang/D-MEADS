@@ -1,0 +1,31 @@
+# Ignore all files by default
+*
+
+# But keep these final cleaned files
+!final_tsla_news_cleaned.csv
+!final_intc_news_cleaned.csv
+
+# Keep documentation
+!README.md
+
+# Keep this gitignore file
+!.gitignore
+
+# Explicitly ignore large raw data files (even if patterns change)
+All_external.csv
+nasdaq_exteral_data.csv
+*.json
+
+# Ignore all intermediate processing files
+nasdaq_*_mentions_*.csv
+nasdaq_*_jan2015_*.csv
+*_external.csv
+csco_*.csv
+pcln_*.csv
+news_data_*.json
+
+# Ignore any temporary or backup files
+*.tmp
+*.bak
+*~
+.DS_Store

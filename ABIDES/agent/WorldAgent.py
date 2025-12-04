@@ -28,14 +28,16 @@ class WorldAgent(Agent):
     # and generates new orders for the next time step
 
 
-    def __init__(self, id, name, type, symbol, date, date_trading_days, model, data_dir, log_orders=True, random_state=None, normalization_terms=None, 
-                 using_diffusion=False, chosen_model=None, seq_len=256, cond_seq_size=255, cond_type='full', size_type_emb=3, gen_seq_size=1):
+    def __init__(self, id, name, type, symbol, date, date_trading_days, model, data_dir, log_orders=True, random_state=None, normalization_terms=None,
+                 using_diffusion=False, chosen_model=None, seq_len=256, cond_seq_size=255, cond_type='full', size_type_emb=3, gen_seq_size=1,
+                 use_news_features=False):
 
         super().__init__(id, name, type, random_state=random_state, log_to_file=log_orders)
         self.count_neg_size = 0
         self.next_historical_orders_index = 0
         self.lob_snapshots = []
         self.sparse_lob_snapshots = []
+        self.news_features = []  # Track news features over time
         self.symbol = symbol
         self.date = date
         self.gen_seq_size = gen_seq_size
@@ -44,7 +46,19 @@ class WorldAgent(Agent):
         self.executed_trades = dict()
         self.state = 'AWAITING_WAKEUP'
         self.model = model
-        self.historical_orders, self.historical_lob = self._load_orders_lob(self.symbol, data_dir, self.date, date_trading_days)
+        self.use_news_features = use_news_features
+
+        # Load historical orders, LOB, and optionally news features
+        if use_news_features:
+            self.historical_orders, self.historical_lob, self.historical_news = self._load_orders_lob_news(
+                self.symbol, data_dir, self.date, date_trading_days
+            )
+        else:
+            self.historical_orders, self.historical_lob = self._load_orders_lob(
+                self.symbol, data_dir, self.date, date_trading_days
+            )
+            self.historical_news = None
+
         self.historical_order_ids = self.historical_orders[:, 2]
         self.unused_order_ids = np.setdiff1d(np.arange(0, 99999999), self.historical_order_ids)
         self.next_orders = None
@@ -134,6 +148,12 @@ class WorldAgent(Agent):
             next_order = self.historical_orders[self.next_historical_orders_index]
             self.last_offset_time = next_order[0]
             self.placeOrder(currentTime, next_order)
+
+            # Track news features during pre-generation phase if enabled
+            if self.use_news_features and self.historical_news is not None:
+                if self.next_historical_orders_index < len(self.historical_news):
+                    self.news_features.append(self.historical_news[self.next_historical_orders_index])
+
             self.next_historical_orders_index += 1
             if self.next_historical_orders_index < len(self.historical_orders):
                 offset = datetime.timedelta(seconds=self.historical_orders[self.next_historical_orders_index, 0])
@@ -288,9 +308,17 @@ class WorldAgent(Agent):
                     cond_lob = None
                 else:
                     raise ValueError("cond_type not recognized")
-                cond_orders = cond_orders.unsqueeze(0)   
+
+                # Add news features if enabled
+                cond_news = None
+                if self.use_news_features and len(self.news_features) >= self.cond_seq_size:
+                    news_window = np.array(self.news_features[-self.cond_seq_size:])
+                    cond_news = torch.from_numpy(news_window).to(cst.DEVICE, torch.float32)
+                    cond_news = cond_news.unsqueeze(0)  # Add batch dimension
+
+                cond_orders = cond_orders.unsqueeze(0)
                 x = torch.zeros(1, self.gen_seq_size, cst.LEN_ORDER, device=cst.DEVICE, dtype=torch.float32)
-                generated = self.model.sample(cond_orders=cond_orders, x=x, cond_lob=cond_lob)
+                generated = self.model.sample(cond_orders=cond_orders, x=x, cond_lob=cond_lob, cond_news=cond_news)
                 post_processed_orders = []
                 for i in range(generated.shape[1]):
                     order = self._postprocess_generated_TRADES(generated[0, i, :])
@@ -735,6 +763,44 @@ class WorldAgent(Agent):
         events = events.to_numpy()
         return events, lob
 
+    def _load_orders_lob_news(self, symbol, data_dir, date, date_trading_days):
+        """
+        Load orders, LOB, and news features for simulation.
+
+        Returns:
+            events: numpy array of order events
+            lob: numpy array of LOB snapshots
+            news: numpy array of news features (sentiment, headline_count)
+        """
+        # First load orders and LOB using the existing method
+        events, lob = self._load_orders_lob(symbol, data_dir, date, date_trading_days)
+
+        # Load news features from the preprocessed .npy file
+        # The news features should have been saved during preprocessing
+        news_path = f"{data_dir}/{symbol}/train_news.npy"  # Assumes we're using training data for replay
+        # TODO: Determine which split (train/val/test) based on the date
+        # For now, assuming train split or full data
+
+        try:
+            news_features = np.load(news_path)
+            print(f"Loaded news features from {news_path}: shape {news_features.shape}")
+
+            # Verify that news features align with events
+            if len(news_features) != len(events):
+                print(f"Warning: News features length ({len(news_features)}) != events length ({len(events)})")
+                # In case of mismatch, truncate or pad as needed
+                min_len = min(len(news_features), len(events))
+                news_features = news_features[:min_len]
+                events = events[:min_len]
+                lob = lob[:min_len]
+
+            return events, lob, news_features
+
+        except FileNotFoundError:
+            print(f"Warning: News features file not found at {news_path}. Using zeros.")
+            # Return zero news features if file doesn't exist
+            news_features = np.zeros((len(events), 3))  # 3 news features
+            return events, lob, news_features
 
     def _preprocess_events_for_market_replay(self, events, lob):
 

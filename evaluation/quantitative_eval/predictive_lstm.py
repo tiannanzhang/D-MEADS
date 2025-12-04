@@ -132,7 +132,13 @@ class Trainer:
 #################################################################################################################################################################################################
 def main(real_data_path, generated_data_path):
     print(generated_data_path)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Auto-detect device (prioritize CUDA > MPS > CPU)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     df_r = pd.read_csv(real_data_path)
     df_g = pd.read_csv(generated_data_path)

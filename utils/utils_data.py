@@ -234,14 +234,27 @@ def reset_indexes(dataframes):
     return dataframes
 
 
-def preprocess_data(dataframes, n_lob_levels, chosen_model):
+def preprocess_data(dataframes, n_lob_levels, chosen_model, trading_date=None):
+    """
+    Preprocess LOBSTER data.
+
+    Args:
+        dataframes: [messages_df, orderbook_df]
+        n_lob_levels: Number of LOB levels to keep
+        chosen_model: Model type
+        trading_date: Trading date string (e.g., '2015-01-02') for timestamp reconstruction
+
+    Returns:
+        tuple: (orderbook_df, messages_df, timestamps_df)
+            - timestamps_df: DataFrame with actual timestamps (if trading_date provided)
+    """
     dataframes = reset_indexes(dataframes)
 
     # take only the first n_lob_levels levels of the orderbook and drop the others
     dataframes[1] = dataframes[1].iloc[:, :n_lob_levels * cst.LEN_LEVEL]
 
-    # take the indexes of the dataframes that are of type 
-    # 2 (partial deletion), 5 (execution of a hidden limit order), 
+    # take the indexes of the dataframes that are of type
+    # 2 (partial deletion), 5 (execution of a hidden limit order),
     # 6 (cross trade), 7 (trading halt) and drop it
     indexes_to_drop = dataframes[0][dataframes[0]["event_type"].isin([2, 5, 6, 7])].index
     dataframes[0] = dataframes[0].drop(indexes_to_drop)
@@ -251,6 +264,17 @@ def preprocess_data(dataframes, n_lob_levels, chosen_model):
 
     # drop index column in messages
     dataframes[0] = dataframes[0].drop(columns=["order_id"])
+
+    # PRESERVE ORIGINAL TIMESTAMPS before converting to inter-arrival times
+    original_times_seconds = dataframes[0]["time"].values.copy()
+    timestamps_df = None
+
+    if trading_date is not None:
+        # Convert seconds from midnight to actual timestamps
+        base_date = pd.to_datetime(trading_date)
+        timestamps_df = pd.DataFrame({
+            'timestamp': base_date + pd.to_timedelta(original_times_seconds, unit='s')
+        })
 
     # do the difference of time row per row in messages and subsitute the values with the differences
     # Store the initial value of the "time" column
@@ -297,6 +321,10 @@ def preprocess_data(dataframes, n_lob_levels, chosen_model):
     # we eliminate the first row of every dataframe because we can't deduce the depth
     dataframes[0] = dataframes[0].iloc[1:, :]
     dataframes[1] = dataframes[1].iloc[1:, :]
+
+    # Also remove first row from timestamps if they exist
+    if timestamps_df is not None:
+        timestamps_df = timestamps_df.iloc[1:, :].reset_index(drop=True)
 
     dataframes = reset_indexes(dataframes)
     if chosen_model == cst.Models.CGAN:
@@ -354,6 +382,10 @@ def preprocess_data(dataframes, n_lob_levels, chosen_model):
         dataframes[0] = dataframes[0].iloc[256:].reset_index(drop=True)
         dataframes[1] = dataframes[1].iloc[256:].reset_index(drop=True)
 
+        # Also trim timestamps if they exist (for CGAN model)
+        if timestamps_df is not None:
+            timestamps_df = timestamps_df.iloc[256:].reset_index(drop=True)
+
         # Select required columns
         dataframes[1] = dataframes[1][[
             "volume_imbalance_1", "volume_imbalance_5",
@@ -370,7 +402,11 @@ def preprocess_data(dataframes, n_lob_levels, chosen_model):
     dataframes[0]["direction"] = dataframes[0]["direction"] * dataframes[0]["event_type"].apply(
         lambda x: -1 if x == 4 else 1)
 
-    return dataframes[1], dataframes[0]
+    # Return orderbook, messages, and optionally timestamps
+    if timestamps_df is not None:
+        return dataframes[1], dataframes[0], timestamps_df
+    else:
+        return dataframes[1], dataframes[0]
 
 
 def unnormalize(x, mean, std):
@@ -392,6 +428,163 @@ def tanh_encoding_type(data):
     data[:, 1] = torch.where(data[:, 1] == 1.0, 2.0, torch.where(data[:, 1] == 2.0, 1.0, data[:, 1]))
     data[:, 1] = data[:, 1] - 1
     return data
+
+
+def extract_news_features(messages_df, news_df, lookback_window_sec=60, half_life_sec=30):
+    """
+    Extract and align news features with LOB event timestamps.
+
+    This function uses proven exponential weighting for time-series sentiment analysis
+    (see: https://link.springer.com/article/10.1007/s42521-024-00107-2)
+
+    For each LOB event:
+    1. Counts headlines in the past lookback_window_sec seconds (60s window)
+    2. Computes exponentially weighted sentiment from ALL past news (no window restriction)
+       - weight(Δt) = exp(-λ * Δt) where λ = ln(2) / half_life_sec
+       - More recent headlines receive higher weight
+       - Headlines far in the past contribute negligibly due to exponential decay
+
+    Args:
+        messages_df: DataFrame with LOB messages (must have 'timestamp' column)
+        news_df: DataFrame with columns ['timestamp', 'sentiment']
+        lookback_window_sec: Window for counting headlines (default: 60 seconds)
+                            Note: Only applies to headline_count, NOT sentiment
+        half_life_sec: Half-life for exponential decay weighting of sentiment (default: 30 seconds)
+                      Research suggests 1-7 days for daily data; we use 30s for sub-minute LOB events
+
+    Returns:
+        DataFrame with columns: ['sentiment', 'headline_count'] aligned with messages_df
+    """
+    # Validate inputs
+    if 'timestamp' not in messages_df.columns:
+        raise ValueError("messages_df must have 'timestamp' column")
+
+    # Ensure timestamps are datetime
+    messages_df = messages_df.copy()
+    messages_df['timestamp'] = pd.to_datetime(messages_df['timestamp'])
+
+    # Initialize result arrays
+    num_events = len(messages_df)
+    sentiments = np.zeros(num_events)
+    headline_counts = np.zeros(num_events, dtype=int)
+
+    # If no news data, return zeros
+    if len(news_df) == 0 or 'timestamp' not in news_df.columns:
+        return pd.DataFrame({
+            'sentiment': sentiments,
+            'headline_count': headline_counts
+        })
+
+    # Prepare news data
+    news_df = news_df.copy()
+    news_df['timestamp'] = pd.to_datetime(news_df['timestamp'])
+
+    # Ensure timezone compatibility
+    if messages_df['timestamp'].dt.tz is not None and news_df['timestamp'].dt.tz is None:
+        # Make news timestamps timezone-aware (assume UTC)
+        news_df['timestamp'] = news_df['timestamp'].dt.tz_localize('UTC')
+    elif messages_df['timestamp'].dt.tz is None and news_df['timestamp'].dt.tz is not None:
+        # Make news timestamps timezone-naive
+        news_df['timestamp'] = news_df['timestamp'].dt.tz_localize(None)
+
+    news_df = news_df.sort_values('timestamp')
+
+    # Compute decay constant: λ = ln(2) / half_life
+    decay_lambda = np.log(2) / half_life_sec
+
+    # Convert lookback window to timedelta
+    lookback_td = pd.Timedelta(seconds=lookback_window_sec)
+
+    # For each LOB event, compute rolling window features
+    for i, event_time in enumerate(messages_df['timestamp']):
+        # Find news in lookback window (for headline count only)
+        window_start = event_time - lookback_td
+        window_mask = (news_df['timestamp'] >= window_start) & (news_df['timestamp'] <= event_time)
+        window_news = news_df[window_mask]
+
+        # Count headlines in 60-second window
+        headline_counts[i] = len(window_news)
+
+        # Compute exponentially weighted sentiment from ALL past news (no window restriction)
+        past_news_mask = news_df['timestamp'] <= event_time
+        past_news = news_df[past_news_mask]
+
+        if len(past_news) > 0 and 'sentiment' in past_news.columns:
+            # Calculate time deltas in seconds
+            time_deltas = (event_time - past_news['timestamp']).dt.total_seconds().values
+
+            # Compute exponential weights: w(Δt) = exp(-λ * Δt)
+            weights = np.exp(-decay_lambda * time_deltas)
+
+            # Weighted average sentiment
+            sentiments_values = past_news['sentiment'].values
+
+            # Filter out NaN values from sentiments and corresponding weights
+            valid_mask = ~np.isnan(sentiments_values)
+            if np.any(valid_mask):
+                valid_sentiments = sentiments_values[valid_mask]
+                valid_weights = weights[valid_mask]
+                weight_sum = np.sum(valid_weights)
+
+                if weight_sum > 0:
+                    sentiments[i] = np.sum(valid_weights * valid_sentiments) / weight_sum
+                else:
+                    sentiments[i] = 0.0
+            else:
+                sentiments[i] = 0.0
+        else:
+            sentiments[i] = 0.0
+
+    return pd.DataFrame({
+        'sentiment': sentiments,
+        'headline_count': headline_counts
+    })
+
+
+def normalize_news_features(news_features_df, mean_sentiment=None, mean_headline_count=None,
+                            std_sentiment=None, std_headline_count=None):
+    """
+    Z-score normalize news features.
+
+    Args:
+        news_features_df: DataFrame with columns ['sentiment', 'headline_count']
+        mean_sentiment: Mean sentiment (compute from training set)
+        mean_headline_count: Mean headline count (compute from training set)
+        std_sentiment: Std sentiment
+        std_headline_count: Std headline count
+
+    Returns:
+        Tuple: (normalized_df, mean_sentiment, mean_headline_count,
+                std_sentiment, std_headline_count)
+    """
+    news_features_df = news_features_df.copy()
+
+    # Compute statistics if not provided (training set)
+    if mean_sentiment is None or std_sentiment is None:
+        mean_sentiment = news_features_df['sentiment'].mean()
+        std_sentiment = news_features_df['sentiment'].std()
+        if std_sentiment == 0:
+            std_sentiment = 1.0  # Avoid division by zero
+
+    if mean_headline_count is None or std_headline_count is None:
+        mean_headline_count = news_features_df['headline_count'].mean()
+        std_headline_count = news_features_df['headline_count'].std()
+        if std_headline_count == 0:
+            std_headline_count = 1.0
+
+    # Apply z-score normalization
+    news_features_df['sentiment'] = (news_features_df['sentiment'] - mean_sentiment) / std_sentiment
+    news_features_df['headline_count'] = (news_features_df['headline_count'] - mean_headline_count) / std_headline_count
+
+    print()
+    print("News Feature Normalization:")
+    print(f"  mean sentiment: {mean_sentiment:.4f}")
+    print(f"  std sentiment: {std_sentiment:.4f}")
+    print(f"  mean headline_count: {mean_headline_count:.4f}")
+    print(f"  std headline_count: {std_headline_count:.4f}")
+    print()
+
+    return news_features_df, mean_sentiment, mean_headline_count, std_sentiment, std_headline_count
 
 
 def to_sparse_representation(lob, n_levels):

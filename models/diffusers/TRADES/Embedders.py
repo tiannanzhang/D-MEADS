@@ -28,9 +28,10 @@ class TimestepEmbedder(nn.Module):
         :return: an (N, D) Tensor of positional embeddings.
         """
         half = dim // 2
+        # CRITICAL: Remove non_blocking=True to prevent MPS corruption
         freqs = torch.exp(
             -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-        ).to(device=cst.DEVICE, non_blocking=True)
+        ).to(device=cst.DEVICE)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:

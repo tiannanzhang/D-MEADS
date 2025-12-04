@@ -230,7 +230,13 @@ def print_setup(config: Configuration):
     print("Chosen model is: ", config.CHOSEN_MODEL.name)
     print(f"PyTorch version: {torch.__version__}")
     print("Device: ", cst.DEVICE)
-    print(f"CUDA version: {torch.version.cuda if torch.cuda.is_available() else 'None'}")
+    if torch.cuda.is_available():
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    elif torch.backends.mps.is_available():
+        print("MPS (Metal Performance Shaders) is available")
+    else:
+        print("Running on CPU")
     if config.CHOSEN_MODEL == cst.Models.TRADES:
         print("Is augmented: ", config.IS_AUGMENTATION)
         if config.IS_AUGMENTATION:

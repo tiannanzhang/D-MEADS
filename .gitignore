@@ -18,3 +18,5 @@ output
 launch.sh
 env
 launch_sim.sh
+.preprocess_news_temp.py
+CLAUDE.md

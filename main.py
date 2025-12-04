@@ -25,8 +25,10 @@ def set_repoducibility():
 
 def set_torch():
     torch.set_default_dtype(torch.float32)
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    # CUDA-specific optimizations (only apply if CUDA is available)
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     torch.autograd.set_detect_anomaly(False)
     torch.set_float32_matmul_precision('high')
     # this is done for tensorflow
@@ -51,10 +53,13 @@ if __name__ == "__main__":
     set_repoducibility()
     
     config = configuration.Configuration()
-    if (cst.DEVICE == "cpu"):
+    # Set accelerator based on device
+    if cst.DEVICE == "cpu":
         accelerator = "cpu"
-    else:
+    elif cst.DEVICE in ["cuda", "mps"]:
         accelerator = "gpu"
+    else:
+        accelerator = "cpu"
 
     if (not config.IS_DATA_PREPROCESSED):
         for i in range(len(config.CHOSEN_STOCK)):
@@ -64,7 +69,10 @@ if __name__ == "__main__":
                 data_dir=cst.DATA_DIR,
                 date_trading_days=cst.DATE_TRADING_DAYS,
                 split_rates=config.SPLIT_RATES,
-                chosen_model=config.CHOSEN_MODEL
+                chosen_model=config.CHOSEN_MODEL,
+                use_news_features=config.USE_NEWS_FEATURES,
+                news_lookback_window=config.NEWS_LOOKBACK_WINDOW,
+                news_half_life=config.NEWS_HALF_LIFE
             )
             data_builder.prepare_save_datasets()
         

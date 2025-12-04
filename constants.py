@@ -201,8 +201,20 @@ LEN_LEVEL = 4
 LEN_ORDER = 6
 LEN_ORDER_CGAN = 7
 
-DATE_TRADING_DAYS = ["2012-06-21", "2012-06-21"]
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+# News feature constants
+NEWS_FEATURE_NAMES = ['sentiment', 'headline_count']
+NEWS_DATA_DIR = "data/news"
+NEWS_FEATURE_DIM = 2
+
+DATE_TRADING_DAYS = ["2015-01-02", "2015-01-30"]  # January 2015 for news features
+
+# Device selection: prioritize CUDA > MPS > CPU
+if torch.cuda.is_available():
+    DEVICE = 'cuda'
+elif torch.backends.mps.is_available():
+    DEVICE = 'mps'
+else:
+    DEVICE = 'cpu'
 DIR_EXPERIMENTS = "data/experiments"
 DIR_SAVED_MODEL = "data/checkpoints"
 DATA_DIR = "data"

@@ -14,9 +14,21 @@ seaborn
 setuptools
 shapely
 tensorboard
-torch --index-url https://download.pytorch.org/whl/cu118
-torchvision --index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
 torch_ema
 tqdm
 wandb
 gdown
+
+# News feature dependencies
+yfinance
+transformers
+sentencepiece
+feedparser
+beautifulsoup4
+requests
+
+# Fine-tuning dependencies (LoRA support)
+peft
+accelerate

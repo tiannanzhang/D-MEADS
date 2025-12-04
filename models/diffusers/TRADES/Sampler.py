@@ -33,11 +33,29 @@ class ScheduleSampler(ABC):
                  - weights: a tensor of weights to scale the resulting losses.
         """
         w = self.weights()
+
+        # Guard against NaN in weights
+        if np.isnan(w).any():
+            print(f"WARNING: NaN detected in sampler weights! Using uniform distribution.")
+            w = np.ones([len(w)], dtype=np.float32)
+
         p = w / np.sum(w)
+
+        # Guard against NaN in probabilities
+        if np.isnan(p).any():
+            print(f"ERROR: NaN in sampling probabilities after normalization!")
+            p = np.ones([len(p)], dtype=np.float32) / len(p)
+
         indices_np = np.random.choice(len(p), size=(batch_size,), p=p)
-        indices = torch.from_numpy(indices_np).long().to(cst.DEVICE, non_blocking=True)
+
+        # CRITICAL: Remove non_blocking=True to prevent MPS corruption
+        indices_tensor = torch.from_numpy(indices_np).long()
+        indices = indices_tensor.to(cst.DEVICE)
+
         weights_np = 1 / (len(p) * p[indices_np])
-        weights = torch.from_numpy(weights_np).float().to(cst.DEVICE, non_blocking=True)
+        weights_tensor = torch.from_numpy(weights_np).float()
+        weights = weights_tensor.to(cst.DEVICE)
+
         return indices, weights
 
     
@@ -64,6 +82,12 @@ class LossSecondMomentResampler(ScheduleSampler):
         for i in range(len(losses)):
             t = ts[i].item()
             loss = losses[i].item()
+
+            # Guard against NaN losses corrupting the history
+            if np.isnan(loss) or np.isinf(loss):
+                print(f"WARNING: Invalid loss (NaN or Inf) at timestep {t}, skipping update")
+                continue
+
             if self._loss_counts[t] == self.history_per_term:
                 # Shift out the oldest loss term.
                 self._loss_history[t, :-1] = self._loss_history[t, 1:]
