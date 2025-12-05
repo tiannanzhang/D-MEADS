@@ -75,7 +75,11 @@ def main(path):
     
     
     # Detect label based on path characteristics
-    if "market_replay" in path.lower() or "replay" in path.lower():
+    if "finetuned" in path.lower():
+        upper_bound = 7000 if "INTC" in path else 600
+        plt.ylim(50, upper_bound)
+        title = "Volume Finetuned TRADES simulation"
+    elif "market_replay" in path.lower() or "replay" in path.lower():
         upper_bound = 7000 if "INTC" in path else 1000
         plt.ylim(50, upper_bound)
         title = "Volume Market Replay"

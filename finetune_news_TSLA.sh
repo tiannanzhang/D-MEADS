@@ -1,0 +1,1 @@
+python3 finetune_with_news.py --checkpoint "data/checkpoints/TRADES/val_ema=0.811_epoch=3_TSLA_full_cond_aug_MLP_concatenation_MLP_seq_size_256_augment_dim_64_CDT_depth_8__diffsteps_100.ckpt" --learning_rate 1e-5 --epochs 15 --batch_size 128 --num_workers 0 2>&1 | tee finetune_output_TSLA.log

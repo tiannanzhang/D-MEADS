@@ -408,7 +408,7 @@ def main():
     # Setup callbacks
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.output_dir,
-        filename="epoch{epoch:02d}_val{val_ema_loss:.4f}",
+        filename=f"val_ema={{val_ema_loss:.3f}}_epoch={{epoch}}_{stock_name}_finetuned_model",
         monitor="val_ema_loss",
         mode="min",
         save_top_k=3,  # Keep top 3 checkpoints

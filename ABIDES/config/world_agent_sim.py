@@ -110,6 +110,11 @@ parser.add_argument('-nsteps',
                     type=int,
                     default=1,
                     help='nsteps for DDIM')
+parser.add_argument('-ft',
+                    '--finetuned',
+                    type=bool,
+                    default=False,
+                    help='Use finetuned model with news features')
 
 args, remaining_args = parser.parse_known_args()
 
@@ -214,20 +219,44 @@ agent_count += 1
 
 # 2) World Agent
 if args.diffusion:
-    dir_path = Path(cst.DIR_SAVED_MODEL + "/" + str(chosen_model.value))
+    # Select directory based on finetuned flag
+    if args.finetuned:
+        dir_path = Path(cst.DIR_SAVED_MODEL + "/NEWS_TRADES")
+    else:
+        dir_path = Path(cst.DIR_SAVED_MODEL + "/" + str(chosen_model.value))
+
     best_val_loss = np.inf
+
     if args.id is None:
         for file in dir_path.iterdir():
-            if symbol in file.name:
-                try:
-                    val_loss = float(file.name.split("=")[1].split("_")[0])
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        checkpoint_reference = file
-                except:
+            if not file.is_file() or not file.name.endswith('.ckpt'):
+                continue
+
+            # For finetuned: look for stock-specific finetuned_model.ckpt
+            if args.finetuned:
+                if "finetuned_model" not in file.name:
                     continue
+                if symbol not in file.name:
+                    continue
+            else:
+                # For naive: look for stock-specific checkpoints
+                if symbol not in file.name:
+                    continue
+
+            try:
+                # Parse val_ema from filename
+                # Both formats use: val_ema=X.XXX_epoch=N_...
+                val_loss = float(file.name.split("val_ema=")[1].split("_")[0])
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    checkpoint_reference = file
+            except:
+                continue
     else:
         for file in dir_path.iterdir():
+            if not file.is_file() or not file.name.endswith('.ckpt'):
+                continue
             try:
                 val_loss = float(file.name.split("=")[1].split("_")[0])
                 if val_loss == args.id:
@@ -243,9 +272,20 @@ if args.diffusion:
     config.SAMPLING_TYPE = args.sampling_type
     config.HYPER_PARAMETERS[cst.LearningHyperParameter.DDIM_ETA] = args.ddim_eta
     config.HYPER_PARAMETERS[cst.LearningHyperParameter.DDIM_NSTEPS] = args.ddim_nsteps
+
+    # Enable news features for finetuned models
+    if args.finetuned:
+        config.USE_NEWS_FEATURES = True
+        config.NEWS_FEATURE_DIM = 2
+        print("News features enabled for finetuned model")
+
     if config.CHOSEN_MODEL == cst.Models.TRADES:
         # load checkpoint
         model = DiffusionEngine.load_from_checkpoint(checkpoint_reference, config=config, map_location=cst.DEVICE, weights_only=False)
+
+        # Determine if news features should be used
+        use_news_features = args.finetuned and config.USE_NEWS_FEATURES
+
         agents.extend([WorldAgent(id=1,
                           name="WORLD_AGENT",
                           type="WorldAgent",
@@ -264,6 +304,7 @@ if args.diffusion:
                           using_diffusion=args.diffusion,
                             chosen_model=args.chosen_model,
                             gen_seq_size=config.HYPER_PARAMETERS[cst.LearningHyperParameter.MASKED_SEQ_SIZE],
+                            use_news_features=use_news_features,
                           )
                ])
     elif config.CHOSEN_MODEL == cst.Models.CGAN:
@@ -363,12 +404,14 @@ time_mkt_close = str(tmp.time()).replace(':', '-')
 
 if trade_pov:
     if args.diffusion:
-        log_dir = "world_agent_{}_{}_{}_pov_{}_{}_{}_{}_{}_".format(symbol, date, time_mkt_close, pov_proportion_of_volume, seed, args.sampling_type, args.ddim_eta, args.ddim_nsteps) + checkpoint_reference.name[:13] 
+        prefix = "finetuned_" if args.finetuned else ""
+        log_dir = "{}world_agent_{}_{}_{}_pov_{}_{}_{}_{}_{}_".format(prefix, symbol, date, time_mkt_close, pov_proportion_of_volume, seed, args.sampling_type, args.ddim_eta, args.ddim_nsteps) + checkpoint_reference.name[:13]
     else:
         log_dir = "market_replay_{}_{}_{}_pov_{}_{}".format(symbol, date, time_mkt_close, pov_proportion_of_volume, seed)
 else:
     if args.diffusion:
-        log_dir = "world_agent_{}_{}_{}_{}_{}_{}_{}_".format(symbol, date, time_mkt_close, seed, args.sampling_type, args.ddim_eta, args.ddim_nsteps) + checkpoint_reference.name[:13]
+        prefix = "finetuned_" if args.finetuned else ""
+        log_dir = "{}world_agent_{}_{}_{}_{}_{}_{}_{}_".format(prefix, symbol, date, time_mkt_close, seed, args.sampling_type, args.ddim_eta, args.ddim_nsteps) + checkpoint_reference.name[:13]
     else:
         log_dir = "market_replay_{}_{}_{}_{}".format(symbol, date, time_mkt_close, seed)
 

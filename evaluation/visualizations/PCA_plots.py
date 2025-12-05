@@ -69,7 +69,9 @@ def preprocess_data(df):
 
 def plot_data(pca, pca2, generated_path):
     # Detect label based on path characteristics
-    if "market_replay" in generated_path.lower() or "replay" in generated_path.lower():
+    if "finetuned" in generated_path.lower():
+        label = "Finetuned TRADES"
+    elif "market_replay" in generated_path.lower() or "replay" in generated_path.lower():
         label = "Market Replay"
     elif "IABS" in generated_path:
         label = "IABS"

@@ -55,7 +55,9 @@ def main(real_path, generated_path):
     time2 = dates.date2num(time2)
     '''
     # Detect label based on path characteristics
-    if "market_replay" in generated_path.lower() or "replay" in generated_path.lower():
+    if "finetuned" in generated_path.lower():
+        label = "Finetuned TRADES"
+    elif "market_replay" in generated_path.lower() or "replay" in generated_path.lower():
         label = "Market Replay"
     elif "IABS" in generated_path:
         label = "IABS"

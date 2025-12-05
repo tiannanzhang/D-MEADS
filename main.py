@@ -10,11 +10,15 @@ from preprocessing.LOBSTERDataBuilder import LOBSTERDataBuilder
 import evaluation.quantitative_eval.predictive_lstm as predictive_lstm
 import evaluation.visualizations.comparison_distribution_order_type as comparison_distribution_order_type
 import evaluation.visualizations.comparison_distribution_market_spread as comparison_distribution_market_spread
+import evaluation.visualizations.comparison_distribution_order_type_4way as comparison_distribution_order_type_4way
+import evaluation.visualizations.comparison_distribution_market_spread_4way as comparison_distribution_market_spread_4way
 import evaluation.visualizations.PCA_plots as PCA_plots
 import evaluation.visualizations.comparison_midprice as comparison_midprice
 import evaluation.visualizations.comparison_volume_distribution as comparison_volume_distribution
 import evaluation.visualizations.comparison_core_coef_lags as comparison_core_coef_lags
+import evaluation.visualizations.comparison_core_coef_lags_4way as comparison_core_coef_lags_4way
 import evaluation.visualizations.comparison_correlation_coefficient as comparison_correlation_coefficient
+import evaluation.visualizations.comparison_correlation_coefficient_4way as comparison_correlation_coefficient_4way
 import evaluation.visualizations.comparison_log_return_frequency as comparison_log_return_frequency
 import evaluation.visualizations.comparison_distribution_log_interarrival_times as comparison_distribution_log_interarrival_times
 
@@ -35,29 +39,47 @@ def set_torch():
     import os
     os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-def plot_graphs(real_data_path=None, TRADES_data_path=None, iabs_data_path=None, cgan_data_path=None):
+def plot_graphs(real_data_path=None, TRADES_data_path=None, finetuned_TRADES_data_path=None, cgan_data_path=None):
     warnings.filterwarnings("ignore")
 
-    # Order type and market spread comparisons (Real, TRADES, CGAN - no IABS)
+    has_finetuned = finetuned_TRADES_data_path is not None
+
+    # 3-way comparisons (always run with Real, TRADES, CGAN)
     comparison_distribution_order_type.main(real_data_path, TRADES_data_path, cgan_data_path)
     comparison_distribution_market_spread.main(real_data_path, TRADES_data_path, cgan_data_path)
+
+    # 4-way comparisons (when finetuned available)
+    if has_finetuned:
+        comparison_distribution_order_type_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
+        comparison_distribution_market_spread_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
 
     # PCA plots for Real vs TRADES and Real vs CGAN
     PCA_plots.main(real_data_path, TRADES_data_path)
     PCA_plots.main(real_data_path, cgan_data_path)
+    if has_finetuned:
+        PCA_plots.main(real_data_path, finetuned_TRADES_data_path)
 
     # Midprice comparison for Real vs TRADES and Real vs CGAN
     comparison_midprice.main(real_data_path, TRADES_data_path)
     comparison_midprice.main(real_data_path, cgan_data_path)
+    if has_finetuned:
+        comparison_midprice.main(real_data_path, finetuned_TRADES_data_path)
 
     # Volume distribution for Real, TRADES, and CGAN
     comparison_volume_distribution.main(real_data_path)
     comparison_volume_distribution.main(TRADES_data_path)
     comparison_volume_distribution.main(cgan_data_path)
+    if has_finetuned:
+        comparison_volume_distribution.main(finetuned_TRADES_data_path)
 
     # these last plots are slow, they will take a couple of minutes to run
     comparison_core_coef_lags.main(real_data_path, TRADES_data_path, cgan_data_path)
     comparison_correlation_coefficient.main(real_data_path, TRADES_data_path, cgan_data_path)
+
+    # 4-way comparisons for correlation/coef (when finetuned available)
+    if has_finetuned:
+        comparison_core_coef_lags_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
+        comparison_correlation_coefficient_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
 
     comparison_log_return_frequency.main(real_data_path, TRADES_data_path, cgan_data_path)
 
@@ -105,7 +127,8 @@ if __name__ == "__main__":
         run(config, accelerator)
 
     elif config.IS_EVALUATION:
-        plot_graphs(config.REAL_DATA_PATH, config.TRADES_DATA_PATH, config.IABS_DATA_PATH, config.CGAN_DATA_PATH)
+        # Note: config.IABS_DATA_PATH has been replaced with config.FINETUNED_TRADES_DATA_PATH
+        plot_graphs(config.REAL_DATA_PATH, config.TRADES_DATA_PATH, None, config.CGAN_DATA_PATH)
         predictive_lstm.main(config.REAL_DATA_PATH, config.TRADES_DATA_PATH)
         
 
