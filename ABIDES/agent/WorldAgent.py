@@ -775,11 +775,11 @@ class WorldAgent(Agent):
         # First load orders and LOB using the existing method
         events, lob = self._load_orders_lob(symbol, data_dir, date, date_trading_days)
 
-        # Load news features from the preprocessed .npy file
-        # The news features should have been saved during preprocessing
-        news_path = f"{data_dir}/{symbol}/train_news.npy"  # Assumes we're using training data for replay
-        # TODO: Determine which split (train/val/test) based on the date
-        # For now, assuming train split or full data
+        # Determine which split (train/val/test) the simulation date belongs to
+        split_name = self._determine_data_split(date, date_trading_days)
+
+        # Load news features from the appropriate split
+        news_path = f"{data_dir}/{symbol}/{split_name}_news.npy"
 
         try:
             news_features = np.load(news_path)
@@ -799,8 +799,62 @@ class WorldAgent(Agent):
         except FileNotFoundError:
             print(f"Warning: News features file not found at {news_path}. Using zeros.")
             # Return zero news features if file doesn't exist
-            news_features = np.zeros((len(events), 3))  # 3 news features
+            news_features = np.zeros((len(events), 2))  # 2 news features (sentiment, headline_count)
             return events, lob, news_features
+
+    def _determine_data_split(self, simulation_date, date_trading_days):
+        """
+        Determine which data split (train/val/test) a simulation date belongs to.
+
+        IMPORTANT: This uses the ORIGINAL preprocessing date range, not the runtime
+        date_trading_days parameter (which may be modified in notebooks).
+
+        Args:
+            simulation_date: The date being simulated (e.g., "2015-01-29")
+            date_trading_days: List of [start_date, end_date] (NOT USED - see note above)
+
+        Returns:
+            split_name: "train", "val", or "test"
+        """
+        import constants as cst
+        from datetime import datetime, timedelta
+
+        # Use HARDCODED preprocessing date range, not runtime parameter
+        # This is the range used when creating train/val/test_news.npy files
+        PREPROCESSING_START = "2015-01-02"
+        PREPROCESSING_END = "2015-01-30"
+
+        # Parse date range using preprocessing dates
+        start_date = datetime.strptime(PREPROCESSING_START, "%Y-%m-%d")
+        end_date = datetime.strptime(PREPROCESSING_END, "%Y-%m-%d")
+
+        # Generate all trading days in range (assuming weekdays only for simplicity)
+        trading_days = []
+        current_date = start_date
+        while current_date <= end_date:
+            # Skip weekends (5=Saturday, 6=Sunday)
+            if current_date.weekday() < 5:
+                trading_days.append(current_date.strftime("%Y-%m-%d"))
+            current_date += timedelta(days=1)
+
+        # Find position of simulation date
+        try:
+            date_index = trading_days.index(simulation_date)
+        except ValueError:
+            print(f"Warning: Simulation date {simulation_date} not in preprocessing range. Using test split.")
+            return "test"
+
+        # Determine split based on position and split rates
+        num_days = len(trading_days)
+        train_end = int(num_days * cst.SPLIT_RATES[0])
+        val_end = int(num_days * (cst.SPLIT_RATES[0] + cst.SPLIT_RATES[1]))
+
+        if date_index < train_end:
+            return "train"
+        elif date_index < val_end:
+            return "val"
+        else:
+            return "test"
 
     def _preprocess_events_for_market_replay(self, events, lob):
 

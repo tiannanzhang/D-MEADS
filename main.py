@@ -127,8 +127,9 @@ if __name__ == "__main__":
         run(config, accelerator)
 
     elif config.IS_EVALUATION:
-        # Note: config.IABS_DATA_PATH has been replaced with config.FINETUNED_TRADES_DATA_PATH
-        plot_graphs(config.REAL_DATA_PATH, config.TRADES_DATA_PATH, None, config.CGAN_DATA_PATH)
+        # Check if finetuned TRADES data path is configured
+        finetuned_path = getattr(config, 'FINETUNED_TRADES_DATA_PATH', None)
+        plot_graphs(config.REAL_DATA_PATH, config.TRADES_DATA_PATH, finetuned_path, config.CGAN_DATA_PATH)
         predictive_lstm.main(config.REAL_DATA_PATH, config.TRADES_DATA_PATH)
         
 
