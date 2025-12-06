@@ -772,18 +772,79 @@ class WorldAgent(Agent):
             lob: numpy array of LOB snapshots
             news: numpy array of news features (sentiment, headline_count)
         """
+        import pandas as pd
+        import os
+
         # First load orders and LOB using the existing method
         events, lob = self._load_orders_lob(symbol, data_dir, date, date_trading_days)
 
         # Determine which split (train/val/test) the simulation date belongs to
         split_name = self._determine_data_split(date, date_trading_days)
 
-        # Load news features from the appropriate split
-        news_path = f"{data_dir}/{symbol}/{split_name}_news.npy"
+        # Try to load per-day news file first (new format with timestamps)
+        per_day_news_path = f"{data_dir}/{symbol}/{split_name}_news_{date}.csv"
+
+        if os.path.exists(per_day_news_path):
+            print(f"Loading per-day news file: {per_day_news_path}")
+            news_df = pd.read_csv(per_day_news_path)
+
+            # Extract time window from events to filter news
+            # Events array has 'time' in first column (time deltas after preprocessing)
+            if len(events) > 0:
+                # Convert event times to timestamps
+                # Assuming market opens at 9:30 AM (34200 seconds from midnight)
+                market_open_seconds = 34200  # 9:30 AM
+                event_start_time = events[0, 0]  # First event time (absolute)
+                event_end_time = events[:, 0].sum()  # Last event time (sum of all deltas)
+
+                # Parse timestamps in news_df
+                news_df['timestamp'] = pd.to_datetime(news_df['timestamp'])
+
+                # Convert to seconds from midnight for comparison
+                news_df['seconds_from_midnight'] = (
+                    news_df['timestamp'].dt.hour * 3600 +
+                    news_df['timestamp'].dt.minute * 60 +
+                    news_df['timestamp'].dt.second
+                )
+
+                # Filter news to match event time window
+                # Events use seconds from market open, so convert
+                event_start_seconds = market_open_seconds + event_start_time
+                event_end_seconds = market_open_seconds + event_end_time
+
+                filtered_news = news_df[
+                    (news_df['seconds_from_midnight'] >= event_start_seconds) &
+                    (news_df['seconds_from_midnight'] <= event_end_seconds)
+                ]
+
+                print(f"Filtered news from {len(news_df)} to {len(filtered_news)} rows "
+                      f"(time window: {event_start_time:.0f}s - {event_end_time:.0f}s from market open)")
+
+                # Extract features
+                news_features = filtered_news[['sentiment', 'headline_count']].values
+
+                # Handle alignment
+                if len(news_features) != len(events):
+                    print(f"Warning: News length ({len(news_features)}) != events length ({len(events)}). "
+                          f"Using nearest-neighbor interpolation.")
+                    # Use simple truncation/padding for now
+                    if len(news_features) > len(events):
+                        news_features = news_features[:len(events)]
+                    else:
+                        # Pad with last value
+                        padding = np.repeat(news_features[-1:], len(events) - len(news_features), axis=0)
+                        news_features = np.vstack([news_features, padding])
+
+                return events, lob, news_features
+
+        # Fallback: try legacy combined .npy file
+        legacy_news_path = f"{data_dir}/{symbol}/{split_name}_news.npy"
 
         try:
-            news_features = np.load(news_path)
-            print(f"Loaded news features from {news_path}: shape {news_features.shape}")
+            news_features = np.load(legacy_news_path)
+            print(f"Loaded legacy news features from {legacy_news_path}: shape {news_features.shape}")
+            print(f"Warning: Using legacy combined news file without time filtering. "
+                  f"Consider re-running preprocessing to generate per-day news files.")
 
             # Verify that news features align with events
             if len(news_features) != len(events):
@@ -797,7 +858,7 @@ class WorldAgent(Agent):
             return events, lob, news_features
 
         except FileNotFoundError:
-            print(f"Warning: News features file not found at {news_path}. Using zeros.")
+            print(f"Warning: News features file not found at {per_day_news_path} or {legacy_news_path}. Using zeros.")
             # Return zero news features if file doesn't exist
             news_features = np.zeros((len(events), 2))  # 2 news features (sentiment, headline_count)
             return events, lob, news_features

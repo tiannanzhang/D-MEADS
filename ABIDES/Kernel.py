@@ -320,9 +320,14 @@ class Kernel:
     print ("Simulation ending!")
     # Handle different log_dir naming conventions:
     # - world_agent_STOCK_DATE_TIME or market_replay_STOCK_DATE_TIME → indices 2,3,4
+    # - finetuned_world_agent_STOCK_DATE_TIME → indices 3,4,5
     # - rmsc03_STOCK_DATE_TIME → indices 1,2,3
     parts = self.log_dir.split("_")
-    if self.log_dir.startswith("world_agent") or self.log_dir.startswith("market_replay"):
+    if self.log_dir.startswith("finetuned_world_agent"):
+        stock_name = parts[3]
+        date = parts[4]
+        time = parts[5]
+    elif self.log_dir.startswith("world_agent") or self.log_dir.startswith("market_replay"):
         stock_name = parts[2]
         date = parts[3]
         time = parts[4]
