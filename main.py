@@ -20,7 +20,9 @@ import evaluation.visualizations.comparison_core_coef_lags_4way as comparison_co
 import evaluation.visualizations.comparison_correlation_coefficient as comparison_correlation_coefficient
 import evaluation.visualizations.comparison_correlation_coefficient_4way as comparison_correlation_coefficient_4way
 import evaluation.visualizations.comparison_log_return_frequency as comparison_log_return_frequency
+import evaluation.visualizations.comparison_log_return_frequency_4way as comparison_log_return_frequency_4way
 import evaluation.visualizations.comparison_distribution_log_interarrival_times as comparison_distribution_log_interarrival_times
+import evaluation.visualizations.comparison_distribution_log_interarrival_times_4way as comparison_distribution_log_interarrival_times_4way
 
 def set_repoducibility():
     torch.manual_seed(cst.SEED)
@@ -81,9 +83,15 @@ def plot_graphs(real_data_path=None, TRADES_data_path=None, finetuned_TRADES_dat
         comparison_core_coef_lags_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
         comparison_correlation_coefficient_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
 
+    # Log return frequency comparison
     comparison_log_return_frequency.main(real_data_path, TRADES_data_path, cgan_data_path)
+    if has_finetuned:
+        comparison_log_return_frequency_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
 
+    # Distribution log interarrival times comparison
     comparison_distribution_log_interarrival_times.main(real_data_path, TRADES_data_path, cgan_data_path)
+    if has_finetuned:
+        comparison_distribution_log_interarrival_times_4way.main(real_data_path, TRADES_data_path, finetuned_TRADES_data_path, cgan_data_path)
 
 if __name__ == "__main__":
     set_torch()
