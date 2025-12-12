@@ -3,11 +3,11 @@ import numpy as np
 from datetime import datetime
 
 # Read CSV in chunks to handle large file
-csv_path = 'data/news/All_external.csv'
+csv_path = "data/news/All_external.csv"
 chunk_size = 100000
 
 print("Analyzing All_external.csv...")
-print("=" * 80)
+
 
 # First, get basic info from first chunk
 first_chunk = pd.read_csv(csv_path, nrows=1000)
@@ -29,15 +29,15 @@ for i, chunk in enumerate(pd.read_csv(csv_path, chunksize=chunk_size)):
     total_rows += len(chunk)
 
     # Collect unique stocks
-    unique_stocks.update(chunk['Stock_symbol'].dropna().unique())
+    unique_stocks.update(chunk["Stock_symbol"].dropna().unique())
 
     # Collect date range (sample)
     if i < 10:  # Only sample first 10 chunks for dates
-        dates.extend(chunk['Date'].dropna().tolist())
+        dates.extend(chunk["Date"].dropna().tolist())
 
     # Collect publishers and authors
-    publishers.update(chunk['Publisher'].dropna().unique())
-    authors.update(chunk['Author'].dropna().unique())
+    publishers.update(chunk["Publisher"].dropna().unique())
+    authors.update(chunk["Author"].dropna().unique())
 
     # Count nulls
     for col in chunk.columns:
@@ -46,9 +46,9 @@ for i, chunk in enumerate(pd.read_csv(csv_path, chunksize=chunk_size)):
     if (i + 1) % 10 == 0:
         print(f"  Processed {(i + 1) * chunk_size:,} rows...")
 
-print("\n" + "=" * 80)
+print("\n")
 print("SUMMARY STATISTICS")
-print("=" * 80)
+
 
 print(f"\nTotal Rows: {total_rows:,}")
 print(f"Number of Unique Stock Symbols: {len(unique_stocks)}")
@@ -79,4 +79,4 @@ print(sorted(list(unique_stocks))[:20])
 print("\nSample Publishers (first 10):")
 print(sorted(list(publishers))[:10])
 
-print("\n" + "=" * 80)
+print("\n")
